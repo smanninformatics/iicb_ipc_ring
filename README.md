@@ -1,4 +1,4 @@
-# Facility Proximity Mapper
+# IICB IPC Ring Map
 
 A browser-based tool for mapping healthcare facilities around a case location,
 with proximity filtering, data-quality deduplication, and optional

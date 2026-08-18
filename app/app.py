@@ -117,6 +117,26 @@ def process_osm_result(osm_result, lat, lon, max_radius):
         "amenity": osm_result["amenities"][mask],
     })
 
+def _swatch(color, label):
+    return (f'<span style="display:inline-flex;align-items:center;margin-right:14px;'
+            f'white-space:nowrap;">'
+            f'<span style="width:12px;height:12px;border-radius:50%;background:{color};'
+            f'display:inline-block;margin-right:5px;border:1px solid #555;"></span>'
+            f'{label}</span>')
+
+LEGEND_HTML = (
+    '<div style="display:flex;flex-wrap:wrap;row-gap:4px;font-size:0.85em;'
+    'margin-top:8px;border-top:1px solid #eee;padding-top:6px;">'
+    + _swatch("#2e7d32", "Score ≥ 80")
+    + _swatch("orange", "Score 50–79")
+    + _swatch("red", "Score < 50")
+    + _swatch("gray", "Unscored")
+    + _swatch("cadetblue", "No score column")
+    + _swatch("blue", "Case location")
+    + _swatch("purple", "OSM facility")
+    + "</div>"
+)
+
 # ---------------------------------------------------------------- state
 facdf = reactive.value(pd.DataFrame())
 case_location = reactive.value(None)   # {"lat","lon","id"} — set by button only
@@ -477,28 +497,37 @@ with ui.card(fill=False, class_="mb-3"):
             ui.input_action_button("refresh_osm", "Refresh OSM",
                                    class_="btn-sm btn-secondary mt-2")
 
-# ---- map ----
-with ui.card(full_screen=True, height="560px"):
-    ui.card_header("Map")
+# ---- summary + legend (own card so map re-renders don't flash it) ----
+with ui.card(fill=False, class_="mb-3"):
+    ui.card_header("Summary")
 
     @render.text
     def mapping_stats():
         if case_location.get() is None:
             return "Upload facility data, then set a case location above."
-        _, n_invalid = cleaned_facility_data()
-        deduped, n_dupes = deduplicated_data()
-        notes = []
-        if n_invalid:
-            notes.append(f"{n_invalid} invalid-coordinate rows dropped")
-        if n_dupes:
-            notes.append(f"{n_dupes} duplicate facility rows collapsed")
-        note = f" ({'; '.join(notes)})" if notes else ""
-        osm_status = ("loading…" if osm_loading()
-                      else str(len(plotted_osm_data())))
-        return (f"Facilities: {len(deduped)}{note} | "
-                f"In radius: {len(get_ring_data())} | "
-                f"On map (after filters): {len(display_data())} | "
-                f"OSM on map: {osm_status}")
+        try:
+            _, n_invalid = cleaned_facility_data()
+            deduped, n_dupes = deduplicated_data()
+            notes = []
+            if n_invalid:
+                notes.append(f"{n_invalid} invalid-coordinate rows dropped")
+            if n_dupes:
+                notes.append(f"{n_dupes} duplicate facility rows collapsed")
+            note = f" ({'; '.join(notes)})" if notes else ""
+            osm_status = ("loading…" if osm_loading()
+                          else str(len(plotted_osm_data())))
+            return (f"Facilities: {len(deduped)}{note} | "
+                    f"In radius: {len(get_ring_data())} | "
+                    f"On map (after filters): {len(display_data())} | "
+                    f"OSM on map: {osm_status}")
+        except Exception:
+            return "Updating…"
+
+    ui.HTML(LEGEND_HTML)
+
+# ---- map ----
+with ui.card(full_screen=True, height="560px"):
+    ui.card_header("Map")
 
     @render.ui
     def map_display():
@@ -520,7 +549,6 @@ with ui.card(full_screen=True, height="560px"):
                           radius=input.radius() * 1000,
                           color="red", fill=False).add_to(m)
 
-            # ---- uploaded facilities (deduped, filtered) ----
             ring = display_data()
             if (not ring.empty and cols["lat"] in ring.columns
                     and "distance" in ring.columns):
@@ -555,7 +583,6 @@ with ui.card(full_screen=True, height="560px"):
                         fill=True, fill_opacity=0.85, tooltip=labels[i],
                     ).add_to(container)
 
-                # table row selection -> bold highlight ring
                 sel = selected_rows()
                 if not sel.empty and cols["lat"] in sel.columns:
                     for _, row in sel.iterrows():
@@ -565,7 +592,6 @@ with ui.card(full_screen=True, height="560px"):
                             tooltip="Selected in table",
                         ).add_to(m)
 
-            # ---- OSM facilities (single source of truth: plotted_osm_data) ----
             for _, row in plotted_osm_data().iterrows():
                 folium.CircleMarker(
                     [row["lat"], row["lon"]], radius=5, color="purple",
@@ -580,7 +606,7 @@ with ui.card(full_screen=True, height="560px"):
                                core_ui.tags.pre(traceback.format_exc()))
 
 # ---- filters + table ----
-with ui.card(full_screen=True, height="640px"):
+with ui.card(full_screen=True):                 # no fixed height → no overlap
     ui.card_header("Facilities")
 
     with ui.accordion(id="filter_panel", open="filters"):
@@ -602,7 +628,7 @@ with ui.card(full_screen=True, height="640px"):
                     return None
                 df, _ = deduplicated_data()
                 items = []
-                with reactive.isolate():               # read prior values, no flicker
+                with reactive.isolate():
                     for c in picks:
                         s = pd.to_numeric(df[c], errors="coerce").dropna()
                         if s.empty:
@@ -630,7 +656,7 @@ with ui.card(full_screen=True, height="640px"):
                     return None
                 df, _ = deduplicated_data()
                 items = []
-                with reactive.isolate():               # read prior values, no flicker
+                with reactive.isolate():
                     for c in picks:
                         choices = sorted(df[c].dropna().astype(str)
                                          .unique().tolist())
@@ -670,9 +696,16 @@ with ui.card(full_screen=True, height="640px"):
                 return (f"Showing {n_show} of {n_ring} in-radius facilities "
                         f"— {active}")
 
+    # Download button in its own right-aligned row ABOVE the table (normal
+    # document flow, so it can't overlap the grid rows).
+    with ui.div(class_="d-flex justify-content-end mb-2"):
+        @render.download(label="⬇ Download filtered CSV",
+                         filename="facilities_filtered.csv")
+        def dl():
+            yield display_data().to_csv(index=False)
+
     @render.data_frame
     def results():
-        # Before a location is set, this card doubles as the data preview
         if case_location.get() is None:
             df = facdf.get()
             return render.DataGrid(df.head(PREVIEW_ROWS), height="360px",
@@ -686,8 +719,3 @@ with ui.card(full_screen=True, height="640px"):
         df = df[front + [c for c in df.columns if c not in front]]
         return render.DataGrid(df, filters=False, height="360px",
                                width="100%", selection_mode="rows")
-
-    @render.download(label="⬇ Download filtered CSV",
-                     filename="facilities_filtered.csv")
-    def dl():
-        yield display_data().to_csv(index=False)
