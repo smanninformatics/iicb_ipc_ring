@@ -5,3 +5,6 @@ numpy
 osmnx
 geopandas
 requests
+jinja2
+pyproj
+networkx
