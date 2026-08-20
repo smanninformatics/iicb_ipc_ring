@@ -28,6 +28,8 @@ jobs:
           cache: pip
       - name: Install shinylive
         run: pip install "shinylive==${{ env.SHINYLIVE_VERSION }}"
+      - name: Refresh pyodide assets
+        run: shinylive assets download 
       - name: Export app
         run: |
           shinylive export app _site
