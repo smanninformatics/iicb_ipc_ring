@@ -1,5 +1,6 @@
 pandas
 folium
+branca
 numpy
 osmnx
 geopandas
