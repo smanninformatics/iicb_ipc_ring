@@ -503,8 +503,16 @@ with ui.card(fill=False, class_="mb-3"):
 
     @render.text
     def mapping_stats():
-        if case_location.get() is None:
-            return "Upload facility data, then set a case location above."
+        loc = case_location.get()
+        if loc is None:
+            return ("Set a case location above to draw the ring and show nearby "
+                    "OSM facilities. Uploading facility data is optional.")
+        osm_status = ("loading…" if osm_loading()
+                      else str(len(plotted_osm_data())))
+        cols = column_map()
+        if cols is None or facdf.get().empty:      # OSM-only mode
+            return (f"No facility file loaded — showing OSM facilities only. | "
+                    f"OSM on map: {osm_status}")
         try:
             _, n_invalid = cleaned_facility_data()
             deduped, n_dupes = deduplicated_data()
@@ -514,15 +522,13 @@ with ui.card(fill=False, class_="mb-3"):
             if n_dupes:
                 notes.append(f"{n_dupes} duplicate facility rows collapsed")
             note = f" ({'; '.join(notes)})" if notes else ""
-            osm_status = ("loading…" if osm_loading()
-                          else str(len(plotted_osm_data())))
             return (f"Facilities: {len(deduped)}{note} | "
                     f"In radius: {len(get_ring_data())} | "
                     f"On map (after filters): {len(display_data())} | "
                     f"OSM on map: {osm_status}")
         except Exception:
             return "Updating…"
-
+            
     ui.HTML(LEGEND_HTML)
 
 # ---- map ----
@@ -536,11 +542,7 @@ with ui.card(full_screen=True, height="560px"):
             return core_ui.div(
                 "The map will appear once a case location is set.",
                 class_="text-muted p-3")
-        cols = column_map()
-        if cols is None:
-            return core_ui.div(
-                "Select latitude/longitude columns in the sidebar.",
-                class_="text-muted p-3")
+        cols = column_map()   # may be None when no facility file is loaded — that's fine
         try:
             m = folium.Map(location=[loc["lat"], loc["lon"]], zoom_start=12)
             folium.Marker([loc["lat"], loc["lon"]], tooltip=loc["id"],
@@ -549,9 +551,10 @@ with ui.card(full_screen=True, height="560px"):
                           radius=input.radius() * 1000,
                           color="red", fill=False).add_to(m)
 
+            # ---- uploaded facilities (only when a file is mapped) ----
             ring = display_data()
-            if (not ring.empty and cols["lat"] in ring.columns
-                    and "distance" in ring.columns):
+            if (cols is not None and not ring.empty
+                    and cols["lat"] in ring.columns and "distance" in ring.columns):
                 lats = ring[cols["lat"]].values
                 lons_arr = ring[cols["lon"]].values
                 dists = ring["distance"].values
@@ -583,6 +586,7 @@ with ui.card(full_screen=True, height="560px"):
                         fill=True, fill_opacity=0.85, tooltip=labels[i],
                     ).add_to(container)
 
+                # table row selection -> bold highlight ring
                 sel = selected_rows()
                 if not sel.empty and cols["lat"] in sel.columns:
                     for _, row in sel.iterrows():
@@ -592,6 +596,7 @@ with ui.card(full_screen=True, height="560px"):
                             tooltip="Selected in table",
                         ).add_to(m)
 
+            # ---- OSM facilities (always drawn when a location is set) ----
             for _, row in plotted_osm_data().iterrows():
                 folium.CircleMarker(
                     [row["lat"], row["lon"]], radius=5, color="purple",
@@ -604,7 +609,7 @@ with ui.card(full_screen=True, height="560px"):
             import traceback
             return core_ui.div(f"Error creating map: {e}",
                                core_ui.tags.pre(traceback.format_exc()))
-
+            
 # ---- filters + table ----
 with ui.card(full_screen=True):                 # no fixed height → no overlap
     ui.card_header("Facilities")
@@ -616,64 +621,65 @@ with ui.card(full_screen=True):                 # no fixed height → no overlap
                                    choices=[], multiple=True,
                                    options={"maxItems": 3,
                                             "placeholder": "select columns…"})
+
                 ui.input_selectize("cat_picker", "Category filters (max 3)",
                                    choices=[], multiple=True,
                                    options={"maxItems": 3,
                                             "placeholder": "select columns…"})
-
-            @render.ui
-            def numeric_filters():
-                picks = input.num_picker() or ()
-                if not picks:
-                    return None
-                df, _ = deduplicated_data()
-                items = []
-                with reactive.isolate():
-                    for c in picks:
-                        s = pd.to_numeric(df[c], errors="coerce").dropna()
-                        if s.empty:
-                            continue
-                        lo = math.floor(float(s.min()))
-                        hi = math.ceil(float(s.max()))
-                        if hi <= lo:
-                            hi = lo + 1
-                        try:
-                            cur = input[f"num_{_slug(c)}"]()
-                            val = (max(lo, min(cur[0], hi)),
-                                   min(hi, max(cur[1], lo)))
-                        except Exception:
-                            val = (lo, hi)
-                        items.append(core_ui.div(
-                            core_ui.input_slider(f"num_{_slug(c)}", c,
-                                                 min=lo, max=hi, value=val),
-                            style="flex:1 1 260px; min-width:260px;"))
-                return core_ui.div(*items, class_="d-flex flex-wrap gap-3")
-
-            @render.ui
-            def category_filters():
-                picks = input.cat_picker() or ()
-                if not picks:
-                    return None
-                df, _ = deduplicated_data()
-                items = []
-                with reactive.isolate():
-                    for c in picks:
-                        choices = sorted(df[c].dropna().astype(str)
-                                         .unique().tolist())
-                        try:
-                            prior = list(input[f"cat_{_slug(c)}"]())
-                        except Exception:
-                            prior = []
-                        items.append(core_ui.div(
-                            core_ui.input_selectize(
-                                f"cat_{_slug(c)}", c, choices=choices,
-                                multiple=True, selected=prior,
-                                options={"placeholder": "All values"}),
-                            style="flex:1 1 240px; min-width:240px;"))
-                return core_ui.div(*items, class_="d-flex flex-wrap gap-3")
-
-            ui.input_action_button("clear_filters", "Clear all filters",
-                                   class_="btn-warning btn-sm mt-2")
+    
+                @render.ui
+                def numeric_filters():
+                    picks = input.num_picker() or ()
+                    if not picks:
+                        return None
+                    df, _ = deduplicated_data()
+                    items = []
+                    with reactive.isolate():
+                        for c in picks:
+                            s = pd.to_numeric(df[c], errors="coerce").dropna()
+                            if s.empty:
+                                continue
+                            lo = math.floor(float(s.min()))
+                            hi = math.ceil(float(s.max()))
+                            if hi <= lo:
+                                hi = lo + 1
+                            try:
+                                cur = input[f"num_{_slug(c)}"]()
+                                val = (max(lo, min(cur[0], hi)),
+                                       min(hi, max(cur[1], lo)))
+                            except Exception:
+                                val = (lo, hi)
+                            items.append(core_ui.div(
+                                core_ui.input_slider(f"num_{_slug(c)}", c,
+                                                     min=lo, max=hi, value=val),
+                                style="flex:1 1 260px; min-width:260px;"))
+                    return core_ui.div(*items, class_="d-flex flex-wrap gap-3")
+            
+                @render.ui
+                def category_filters():
+                    picks = input.cat_picker() or ()
+                    if not picks:
+                        return None
+                    df, _ = deduplicated_data()
+                    items = []
+                    with reactive.isolate():
+                        for c in picks:
+                            choices = sorted(df[c].dropna().astype(str)
+                                             .unique().tolist())
+                            try:
+                                prior = list(input[f"cat_{_slug(c)}"]())
+                            except Exception:
+                                prior = []
+                            items.append(core_ui.div(
+                                core_ui.input_selectize(
+                                    f"cat_{_slug(c)}", c, choices=choices,
+                                    multiple=True, selected=prior,
+                                    options={"placeholder": "All values"}),
+                                style="flex:1 1 240px; min-width:240px;"))
+                    return core_ui.div(*items, class_="d-flex flex-wrap gap-3")
+    
+                ui.input_action_button("clear_filters", "Clear all filters",
+                                       class_="btn-warning btn-sm mt-2")
 
             @render.text
             def filter_summary():
