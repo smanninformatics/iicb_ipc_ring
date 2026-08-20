@@ -28,7 +28,7 @@ jobs:
           cache: pip
       - name: Install shinylive
         run: pip install "shinylive==${{ env.SHINYLIVE_VERSION }}"
-       - name: Export app
+      - name: Export app
         run: |
           shinylive export app _site
           touch _site/.nojekyll
