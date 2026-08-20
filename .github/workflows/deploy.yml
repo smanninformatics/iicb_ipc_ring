@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install shinylive
-        run: pip install shinylive --upgrade shinylive
+        run: pip install --upgrade shinylive
       - name: Export app to static site
         run: shinylive export app _site
       - name: Upload Pages artifact
