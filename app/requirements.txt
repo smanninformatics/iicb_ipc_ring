@@ -4,3 +4,4 @@ branca
 numpy
 osmnx
 geopandas
+requests
