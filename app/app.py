@@ -391,6 +391,49 @@ def manual_osm_refresh():
                    "data": pd.DataFrame(), "loading": True})
     fetch_osm_async(loc["lat"], loc["lon"], OSM_FETCH_RADIUS_KM)
 
+@reactive.extended_task
+async def geocode_async(query):
+    """Resolve a place/address to coordinates via OSM Nominatim (osmnx)."""
+    def _do():
+        try:
+            lat, lon = ox.geocode(query)      # raises if not found
+            return {"lat": float(lat), "lon": float(lon), "query": query}
+        except Exception:
+            return None
+    if IS_PYODIDE:
+        await asyncio.sleep(0.05)             # let 'searching…' paint first
+        return _do()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, _do)
+
+@reactive.effect
+@reactive.event(input.geo_go)
+def _run_geocode():
+    q = (input.geo_search() or "").strip()
+    if not q:
+        return
+    ui.notification_show("Searching…", duration=2)
+    geocode_async(q)
+
+
+@reactive.effect
+def _apply_geocode():
+    res = geocode_async.result()             # SilentException before first run
+    if res is None:
+        ui.notification_show("Location not found — try a more specific search.",
+                             type="warning")
+        return
+    # populate the manual fields (nice for verification) and commit the location
+    ui.update_text("lat", value=f"{res['lat']:.6f}")
+    ui.update_text("long", value=f"{res['lon']:.6f}")
+    cid = (input.case_id() or "").strip() or res["query"]
+    if not (input.case_id() or "").strip():
+        ui.update_text("case_id", value=res["query"])
+    case_location.set({"lat": res["lat"], "lon": res["lon"], "id": cid})
+    ui.notification_show(
+        f"Centered on {res['lat']:.5f}, {res['lon']:.5f} — verify on the map.",
+        duration=5)
+
 # ---------------------------------------------------------------- workflow
 @reactive.effect
 @reactive.event(input.process)
@@ -480,6 +523,14 @@ with ui.sidebar(width=340):
 # ---- case location + map options, visible above the map ----
 with ui.card(fill=False, class_="mb-3"):
     ui.card_header("Case Location")
+
+    ui.input_text("geo_search", "Search by address or place name",
+                  placeholder="e.g. Denver Health, Denver CO",
+                  width="100%")
+    ui.input_action_button("geo_go", "🔍 Search & center",
+                           class_="btn-secondary mb-2")
+    ui.tags.small("— or enter coordinates manually —", class_="text-muted")
+
     with ui.layout_column_wrap(width="240px", fill=False):
         ui.input_text("case_id", "Case ID", placeholder="e.g. C-1042")
         ui.input_text("lat", "Latitude", placeholder="39.7392")
