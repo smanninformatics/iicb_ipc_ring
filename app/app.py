@@ -218,15 +218,20 @@ def deduplicated_data():
 
 @reactive.calc
 def get_ring_data():
-    """Deduped facilities within radius, under max score (parent constraints)."""
+    """Deduped facilities within radius, under max score (parent constraints).
+    Unscored facilities are kept or dropped per the 'include_unscored' toggle;
+    a missing score is treated as unknown, never as 'above the max'."""
     df, _ = deduplicated_data()
     if df.empty:
         return df
     cols = column_map()
     mask = df["distance"] <= input.radius()
     if cols and cols["score"] and cols["score"] in df.columns:
-        mask &= (pd.to_numeric(df[cols["score"]], errors="coerce")
-                 <= float(input.score_max()))
+        s = pd.to_numeric(df[cols["score"]], errors="coerce")
+        keep = s <= float(input.score_max())
+        if input.include_unscored():
+            keep |= s.isna()
+        mask &= keep
     out = df[mask]
     return out.assign(distance=out["distance"].round(2))
 
@@ -295,6 +300,17 @@ def display_data():
 
     return df
 
+@reactive.calc
+def unscored_in_radius():
+    """Number of deduped, in-radius facilities with no usable score.
+    Independent of the include_unscored toggle (so we can report hidden ones)."""
+    df, _ = deduplicated_data()
+    cols = column_map()
+    if (df.empty or not cols or not cols["score"]
+            or cols["score"] not in df.columns):
+        return 0
+    s = pd.to_numeric(df[cols["score"]], errors="coerce")
+    return int(((df["distance"] <= input.radius()) & s.isna()).sum())
 
 @reactive.calc
 def plotted_osm_data():
@@ -542,7 +558,17 @@ with ui.card(fill=False, class_="mb-3"):
     ui.card_header("Map Options")
     with ui.layout_column_wrap(width="280px", fill=False):
         ui.input_slider("radius", "Radius (km)", 1, OSM_FETCH_RADIUS_KM, 2)
-        ui.input_slider("score_max", "Max facility score", 0, 100, 100)
+
+        with ui.div():
+            ui.input_slider("score_max", "Max facility score", 0, 100, 100)
+            # Only shown when a real score column is mapped. The JS condition
+            # is evaluated client-side, so it works identically in shinylive.
+            with ui.panel_conditional(
+                "input.score_col && input.score_col !== '(none)'"
+            ):
+                ui.input_checkbox("include_unscored",
+                                  "Include unscored facilities", True)
+
         with ui.div(class_="d-flex flex-column justify-content-center h-100"):
             ui.input_checkbox("osm", "Include OSM facilities", True)
             ui.input_action_button("refresh_osm", "Refresh OSM",
@@ -573,8 +599,15 @@ with ui.card(fill=False, class_="mb-3"):
             if n_dupes:
                 notes.append(f"{n_dupes} duplicate facility rows collapsed")
             note = f" ({'; '.join(notes)})" if notes else ""
+
+            n_unscored = unscored_in_radius()
+            unscored_txt = ""
+            if n_unscored:
+                state = "shown" if input.include_unscored() else "HIDDEN"
+                unscored_txt = f" | Unscored in radius: {n_unscored} ({state})"
+
             return (f"Facilities: {len(deduped)}{note} | "
-                    f"In radius: {len(get_ring_data())} | "
+                    f"In radius: {len(get_ring_data())}{unscored_txt} | "
                     f"On map (after filters): {len(display_data())} | "
                     f"OSM on map: {osm_status}")
         except Exception:
@@ -749,6 +782,8 @@ with ui.card(full_screen=True):                 # no fixed height → no overlap
                     except Exception:
                         continue
                     bits.append(f"{c}: {lo:g}–{hi:g}")
+                if unscored_in_radius() and not input.include_unscored():
+                    bits.append("unscored hidden")
                 active = " · ".join(bits) if bits else "no column filters active"
                 return (f"Showing {n_show} of {n_ring} in-radius facilities "
                         f"— {active}")
