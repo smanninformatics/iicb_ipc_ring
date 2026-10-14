@@ -557,7 +557,7 @@ with ui.card(fill=False, class_="mb-3"):
 with ui.card(fill=False, class_="mb-3"):
     ui.card_header("Map Options")
     with ui.layout_column_wrap(width="280px", fill=False):
-        ui.input_slider("radius", "Radius (km)", .5, OSM_FETCH_RADIUS_KM, 2)
+        ui.input_slider("radius", "Radius (km)", min=0.5, OSM_FETCH_RADIUS_KM, 1, step=0.5)
 
         with ui.div():
             ui.input_slider("score_max", "Max facility score", 0, 100, 100)
