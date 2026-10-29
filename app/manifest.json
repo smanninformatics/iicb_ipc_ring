@@ -10,7 +10,8 @@
     "package_manager": {
       "name": "pip",
       "version": "26.0.1",
-      "package_file": "requirements.txt"
+      "package_file": "requirements.txt",
+      "allow_uv": false
     }
   },
   "files": {
