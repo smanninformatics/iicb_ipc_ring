@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "locale": "en_US.UTF-8",
+  "metadata": {
+    "appmode": "python-shiny",
+    "entrypoint": "shiny.express.app:app_2e_py"
+  },
+  "python": {
+    "version": "3.9.6",
+    "package_manager": {
+      "name": "pip",
+      "version": "26.0.1",
+      "package_file": "requirements.txt"
+    }
+  },
+  "files": {
+    "requirements.txt": {
+      "checksum": "c67381a00ce979e1e17aa1de7bc7009b"
+    },
+    "app.py": {
+      "checksum": "858d6ff1d3226360b7ec123420242173"
+    }
+  }
+}

@@ -1,3 +1,4 @@
+shiny
 pandas
 folium
 branca
